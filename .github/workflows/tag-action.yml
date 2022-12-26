@@ -1,0 +1,78 @@
+name: production build
+
+on:
+  push:
+    tags:
+    - 'v*'
+
+env:
+  REGISTER: nexus.gorilla-technology.com:17777
+  NEXUS_REPO_RAW: https://nexus.gorilla-technology.com/repository/scap-release-raw/
+  NEXUS_REPO_MAVEN: https://nexus.gorilla-technology.com/service/rest/v1/components?repository=scap-release-maven
+  JOB_NAME: ${GITHUB_REPOSITORY#*/}
+  BUILD_DISPLAY_NAME: ${{ github.ref_name }}
+ 
+jobs:
+  java_build:
+    runs-on: self-hosted
+    steps: 
+    # Checks-out outs repository under $GITHUB_WORKSPACE, so ours job can access it
+     - id: set_value
+       run: |
+         echo "JOB_NAME=${{env.JOB_NAME}}" >> $GITHUB_OUTPUT
+         echo "BUILD_DISPLAY_NAME=${{env.BUILD_DISPLAY_NAME}}" >> $GITHUB_OUTPUT
+       
+     - uses: actions/checkout@v3    
+     - name: Build Java with Maven
+       run: JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 mvn clean install
+       env:
+         JOB_NAME: ${{ steps.set_value.outputs.JOB_NAME }}
+         BUILD_DISPLAY_NAME: ${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}
+         
+     - name: Move to staging and set output
+       run: |
+         mkdir staging 
+         cp target/*.jar staging 
+         cd staging 
+         mv *.jar ${{ steps.set_value.outputs.JOB_NAME }}-${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}.jar
+         ls -l
+         
+     #- name: Upload jar(oply not executable) to nexus (maven)
+     #  run: |
+     #    sed -i "s/\${BUILD_DISPLAY_NAME}/${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}/" pom.xml
+     #    curl -u scap-dev:${{ secrets.SCAP_DEV_PWD }} -F "maven2.generate-pom=false" -F "maven2.asset1=@./pom.xml" -F "maven2.asset1.extension=pom" -F "maven2.asset2=@./staging/${{ steps.set_value.outputs.JOB_NAME }}-${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}.jar" -F "maven2.asset2.extension=jar" ${{ env.NEXUS_REPO_MAVEN }} 
+         
+     - name: Upload jar to nexus (raw)
+       run: |
+         cd staging
+         curl -u scap-dev:${{ secrets.SCAP_DEV_PWD }} --upload-file ${{ steps.set_value.outputs.JOB_NAME }}-${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}.jar  ${{ env.NEXUS_REPO_RAW }}/${{ steps.set_value.outputs.JOB_NAME }}/${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}/
+  
+     - name: Build the docker image
+       run: docker build -f ./dockerfile -t ${{ steps.set_value.outputs.JOB_NAME }}:${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}  --build-arg JOB_NAME=${{ steps.set_value.outputs.JOB_NAME }}  --build-arg BUILD_DISPLAY_NAME=${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}   .
+       
+     #- name: Upload docker tar image to nexus (raw)
+     #  run: |
+     #    cd staging 
+     #    docker save -o ${{ steps.set_value.outputs.JOB_NAME }}-${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}.tar ${{ steps.set_value.outputs.JOB_NAME }}:${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}
+     #    curl -u scap-dev:${{ secrets.SCAP_DEV_PWD }} --upload-file ${{ steps.set_value.outputs.JOB_NAME }}-${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}.tar ${{ env.NEXUS_REPO_RAW }}/${{ steps.set_value.outputs.JOB_NAME }}/${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}/
+            
+    outputs:
+      JOB_NAME: ${{ steps.set_value.outputs.JOB_NAME }}
+      BUILD_DISPLAY_NAME: ${{ steps.set_value.outputs.BUILD_DISPLAY_NAME }}
+      
+            
+  docker_build_and_publish:
+    runs-on: self-hosted 
+    needs: java_build
+    steps: 
+     - name: Login to Nexus
+       uses: docker/login-action@v2
+       with:
+         registry: ${{ env.REGISTER }}
+         username: ${{ secrets.DOCKERHUB_USERNAME }}
+         password: ${{ secrets.DOCKERHUB_TOKEN }}
+     - name: Push to Nexus
+       run: |
+         docker tag ${{ needs.java_build.outputs.JOB_NAME }}:${{ needs.java_build.outputs.BUILD_DISPLAY_NAME }}  ${{ env.REGISTER }}/${{ needs.java_build.outputs.JOB_NAME }}:${{ needs.java_build.outputs.BUILD_DISPLAY_NAME }}
+         docker push ${{ env.REGISTER }}/${{ needs.java_build.outputs.JOB_NAME }}:${{ needs.java_build.outputs.BUILD_DISPLAY_NAME }}
+         docker image rm ${{ needs.java_build.outputs.JOB_NAME }}:${{ needs.java_build.outputs.BUILD_DISPLAY_NAME }}  ${{ env.REGISTER }}/${{ needs.java_build.outputs.JOB_NAME }}:${{ needs.java_build.outputs.BUILD_DISPLAY_NAME }}

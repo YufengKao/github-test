@@ -1,0 +1,37 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+categories:
+  - title: "🚀 Features"
+    labels:
+      - "Type: Feature"
+  - title: "🐛 Bug Fixes"
+    labels:
+      - "Type: Bug"
+change-template: "- $TITLE (#$NUMBER)"
+change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
+autolabeler:
+  - label: "Type: Feature"
+    branch:
+      - '/feature\/.+/'
+      - '/feat\/.+/'
+  - label: "Type: Bug"
+    branch:
+      - '/fix\/.+/'
+sort-direction: ascending
+version-resolver:
+  major:
+    labels:
+      - "major"
+  minor:
+    labels:
+      - "minor"
+      - "Type: Feature"
+  patch:
+    labels:
+      - "patch"
+      - "Type: Bug"
+  default: patch
+template: |
+  ## Changes
+
+  $CHANGES

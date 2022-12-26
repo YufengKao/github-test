@@ -1,0 +1,58 @@
+name: java unit-test build
+
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  run-commitlint-on-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate all commits from PR
+        id: commitlint
+        run: |
+          report="$(npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose)" || result=$? || true
+
+          echo "report<<EOF" >> $GITHUB_OUTPUT
+          if [[ $result -eq 0 ]]; then
+            echo "### CommitLint Report 😎" >> $GITHUB_OUTPUT
+          else
+            echo "### CommitLint Report 😭" >> $GITHUB_OUTPUT
+          fi
+          echo "" >> $GITHUB_OUTPUT
+          echo "${report//✖/❌}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          exit $result
+      - name: Add PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: ${{ always() }}
+        with:
+          message: ${{ steps.commitlint.outputs.report }}
+
+  main_java_test:
+    runs-on: self-hosted
+    needs: [ run-commitlint-on-pr ]
+    steps: 
+     - name: test
+       run: echo unit-test
+    # Checks-out outs repository under $GITHUB_WORKSPACE, so ours job can access it
+     - uses: actions/checkout@v3    
+     - name: Build Java with Maven
+       run: JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 mvn test
+         
